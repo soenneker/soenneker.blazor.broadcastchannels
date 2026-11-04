@@ -1,0 +1,58 @@
+@page "/"
+@using System.Threading.Tasks
+@using Soenneker.Atomics.ValueBools
+@using Soenneker.Blazor.BroadcastChannels.Abstract
+@inject IBroadcastChannels BroadcastChannels
+@implements IAsyncDisposable
+
+<PageTitle>BroadcastChannels demo</PageTitle>
+<h1>BroadcastChannels</h1>
+<p>Open this page in two tabs. Messages appear in the other tab; the sender does not receive its own message.</p>
+<p role="status">@_status</p>
+<label>Message <input @bind="_message" /></label>
+<button @onclick="Send" disabled="@(_channel is null)">Send</button>
+<button @onclick="Close" disabled="@(_channel is null)">Close channel</button>
+<button @onclick="Open" disabled="@(!_supported || _channel is not null)">Open channel</button>
+<p>Last received: <span id="received">@_received</span></p>
+
+@code {
+    private IBroadcastChannel<string>? _channel;
+    private string _status = "Checking browser support";
+    private string _message = "Hello from another tab";
+    private string _received = "None";
+    private bool _supported;
+    private ValueAtomicBool _disposed;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _supported = await BroadcastChannels.IsSupported();
+        if (_supported) await Open();
+        else _status = "BroadcastChannel is unavailable in this browser context.";
+        StateHasChanged();
+    }
+    private async Task Open()
+    {
+        var channel = await BroadcastChannels.Open("soenneker-broadcast-demo",
+            message => InvokeAsync(() => { _received = message; StateHasChanged(); }),
+            DemoJsonContext.Default.String,
+            error => InvokeAsync(() => { _status = error.Message; StateHasChanged(); }));
+        if (_disposed.Value) { await channel.DisposeAsync(); return; }
+        _channel = channel;
+        _status = "Channel open";
+    }
+    private async Task Send()
+    {
+        if (_channel is not null) await _channel.Post(_message);
+    }
+    private async Task Close()
+    {
+        if (_channel is not null) await _channel.DisposeAsync();
+        _channel = null;
+        _status = "Channel closed";
+    }
+    public async ValueTask DisposeAsync()
+    {
+        if (!_disposed.TrySetTrue()) return;
+        if (_channel is not null) await _channel.DisposeAsync();
+    }
+}
